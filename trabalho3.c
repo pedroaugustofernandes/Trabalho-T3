@@ -4,8 +4,7 @@
 #include <time.h>
 #include <unistd.h> 
 #include <string.h>
-#include "video.h"
-#include "teclado.h"
+#include "janela.h"
 
 // includes do allegro
 #include <allegro5/allegro.h>
@@ -17,7 +16,19 @@
 #define LINHAS 6
 #define COLUNAS 5
 
+// Definições gerais
+#define TAMANHO_TABULEIRO 6
+#define TAMANHO_CASA 60
+#define MARGEM 100
 
+typedef enum { NENHUM, LINHA, COLUNA } tipo_selecao_t;
+
+typedef struct {
+    tipo_selecao_t tipo;
+    int indice; // linha ou coluna selecionada
+} selecao_t;
+
+//Definição do tabuleiro
 typedef struct {
     unsigned char dados[LINHAS][COLUNAS];
     int linhas;
@@ -50,7 +61,11 @@ static int aleatorio_entre(int minimo, int maximo) {
     return minimo + rand() % (maximo - minimo); 
 }
 
+//estado do jogo
 typedef struct {
+    // constantes, devem ser inicializadas antes da janela
+    tamanho_t tamanho_janela;
+    retangulo_t contorno_janela;
     // necessários no início de cada partida
     tecla_t tecla;
     double data_inicio;
@@ -96,34 +111,36 @@ void processa_tempo(jogo *pj) {
     if (pj->tempo_de_jogo >= 10) pj->terminou = true;
 }
 
-void imprimeCor(Tabuleiro *tab, int i, int j) {
-    switch (tab->dados[i][j]) {
-        case 0: vid_cor_fundo(fundo); vid_imps("   "); break;
-        case 1: vid_cor_fundo(red); vid_imps("   "); break;
-        case 2: vid_cor_fundo(green); vid_imps("   "); break;
-        case 3: vid_cor_fundo(blue); vid_imps("   "); break;
-        case 4: vid_cor_fundo(yellow); vid_imps("   "); break;
-        case 5: vid_cor_fundo(purple); vid_imps("   "); break;
-        case 6: vid_cor_fundo(orange); vid_imps("   "); break;
-        case 7: vid_cor_fundo(pink); vid_imps("   "); break;
-        case 8: vid_cor_fundo(brown); vid_imps("   "); break;
-        default: vid_cor_fundo(white); vid_imps("   ");
+void imprimeCor(int lin, int col, unsigned char valor, jogo *pj) {
+    ponto_t origem;
+    origem.x = pj->contorno_janela.inicio.x + col * 60;
+    origem.y = pj->contorno_janela.inicio.y + lin * 60;
+    tamanho_t tam = { 58, 58 }; // margem de 2px
+    retangulo_t celula = { origem, tam };
+
+    cor_t cor;
+    switch (valor) {
+        case 1: cor = red; break;
+        case 2: cor = green; break;
+        case 3: cor = blue; break;
+        case 4: cor = yellow; break;
+        case 5: cor = purple; break;
+        case 6: cor = orange; break;
+        case 7: cor = pink; break;
+        case 8: cor = brown; break;
+        default: cor = fundo; break;
     }
-    vid_cor_fundo(fundo);
+
+    j_retangulo(celula, 0, cor, cor); // preenchido
+    j_retangulo(celula, 2, (cor_t){1,1,1,1}, (cor_t){0,0,0,0}); // contorno branco
 }
 
-void imprimirTabela(Tabuleiro *tab) {
-    vid_limpa();
-    vid_cor_fundo(fundo);
-    
+void imprimirTabuleiro(Tabuleiro *tab, jogo *pj) {
     for (int i = 0; i < tab->linhas; i++) {
         for (int j = 0; j < tab->colunas; j++) {
-            imprimeCor(tab, i, j);
+            imprimeCor(i, j, tab->dados[i][j], pj);
         }
-        vid_imps("\n\r");
     }
-    vid_imps("\n\r");
-    vid_atualiza();
 }
 
 // Faz um elemento "cair" em uma coluna até encontrar outra peça ou o fundo
@@ -150,7 +167,7 @@ void aplicar_gravidade_coluna(Tabuleiro *tab, int col) {
 }
 
 // Move linha para direita
-bool move_lin_para_direita(Tabuleiro *tab, int lin) {
+bool move_lin_para_direita(Tabuleiro *tab, int lin, jogo *pj) {
     if (lin < 0 || lin >= tab->linhas) return false;
 
     unsigned char ultimoElemento = tab->dados[lin][tab->colunas-1];
@@ -163,12 +180,12 @@ bool move_lin_para_direita(Tabuleiro *tab, int lin) {
         aplicar_gravidade_coluna(tab, i);
     }
 
-    imprimirTabela(tab);
+    imprimirTabuleiro(tab, pj);
     return true;
 }
 
-// Move linha para esquerda (com toroidal)
-bool move_lin_para_esquerda(Tabuleiro *tab, int lin) {
+// Move linha para esquerda
+bool move_lin_para_esquerda(Tabuleiro *tab, int lin, jogo *pj) {
     if (lin < 0 || lin >= tab->linhas) return false;
 
     unsigned char primeiroElemento = tab->dados[lin][0];
@@ -181,7 +198,7 @@ bool move_lin_para_esquerda(Tabuleiro *tab, int lin) {
         aplicar_gravidade_coluna(tab, i);
     }
 
-    imprimirTabela(tab);
+    imprimirTabuleiro(tab, pj);
     
     return true;
 }
@@ -287,6 +304,7 @@ void salvarPontuacao(jogador *j) {
     }
 }
 
+
 // Reinicia o jogo
 void reiniciar_jogo(jogo *pj, jogador *player, Tabuleiro *tab) {
     pj->tecla = 'x';
@@ -330,7 +348,7 @@ void verificaLinhaVazia(Tabuleiro *tab) {
 //adiciona pontos ao jogador
 void adicionar_pontos(jogador *player, Tabuleiro *tab) {
     for (int col = 0; col < tab->colunas; col++) {
-        if(verificaCol(&tab, col, player->pontuacao)) {
+        if(verificaCol(tab, col, player->pontuacao)) {
             // Adiciona pontos ao jogador
             player->pontuacao += ponto_por_peca * tab->linhas;
         }
@@ -351,36 +369,130 @@ bool jogarNovamente(jogo *pj, jogador *player, Tabuleiro *tab) {
     return false;
 }
 
-// Jogar
-void jogar() {
+
+// Desenhos na tela
+void desenha_tela(Tabuleiro *tab, jogador *j, jogo *pj) {
+    j_limpapix(); // limpa a tela
+
+    // Desenha contorno do tabuleiro
+    j_retangulo(pj->contorno_janela, 3, (cor_t){1,1,1,1}, (cor_t){0,0,0,0});
+
+    desenha_tabuleiro(tab, pj);
+    desenha_info(j, pj);
+
+    j_mostra(); // atualiza a janela
+}
+
+void desenha_tela_final(jogador *j, jogo *pj) {
+    char txt[100];
+    ponto_t pos = { 
+        pj->contorno_janela.inicio.x, pj->contorno_janela.inicio.y 
+        + pj->contorno_janela.tamanho.altura + 20 
+    };
+    sprintf(txt, "Jogador: %s  |  Pontos: %d  |  Etapa: %d  |  Tempo: %.1f", j->nome, j->pontuacao, pj->etapa, pj->tempo_de_jogo);
+    j_texto(pos, (cor_t){1, 1, 1, 1}, txt);
+}
+
+void processa_clique_mouse(selecao_t *selecao) {
+    rato_t rato = j_rato();
+
+    if (rato.clicado[0]) {
+        float x = rato.posicao.x;
+        float y = rato.posicao.y;
+
+        // Verifica clique nas linhas
+        for (int i = 0; i < TAMANHO_TABULEIRO; i++) {
+            float bx = MARGEM - 30;
+            float by = MARGEM + i * TAMANHO_CASA + TAMANHO_CASA/2 - 15;
+            if (x >= bx && x <= bx + 30 && y >= by && y <= by + 30) {
+                selecao->tipo = LINHA;
+                selecao->indice = i;
+                return;
+            }
+        }
+
+        // Verifica clique nas colunas
+        for (int j = 0; j < TAMANHO_TABULEIRO; j++) {
+            float bx = MARGEM + j * TAMANHO_CASA + TAMANHO_CASA/2 - 15;
+            float by = MARGEM + TAMANHO_TABULEIRO * TAMANHO_CASA + 10;
+            if (x >= bx && x <= bx + 30 && y >= by && y <= by + 30) {
+                selecao->tipo = COLUNA;
+                selecao->indice = j;
+                return;
+            }
+        }
+    }
+}
+
+void desenha_seletores(selecao_t selecao) {
+    cor_t cor_padrao = { 0.5, 0.5, 0.5, 1 };
+    cor_t cor_selecionado = { 1, 0.5, 0, 1 };
+
+    // Desenha seletores de linha (à esquerda)
+    for (int i = 0; i < TAMANHO_TABULEIRO; i++) {
+        ponto_t pos = { MARGEM - 30, MARGEM + i * TAMANHO_CASA + TAMANHO_CASA/2 - 15 };
+        retangulo_t ret = { pos, {30, 30} };
+        cor_t cor = (selecao.tipo == LINHA && selecao.indice == i) ? cor_selecionado : cor_padrao;
+        j_retangulo(ret, 2, cor, cor);
+
+        char txt[2];
+        sprintf(txt, "%d", i + 1);
+        j_texto((ponto_t){pos.x + 5, pos.y + 22}, (cor_t){1,1,1,1}, txt);
+    }
+
+    // Desenha seletores de coluna (abaixo)
+    for (int j = 0; j < TAMANHO_TABULEIRO; j++) {
+        ponto_t pos = { MARGEM + j * TAMANHO_CASA + TAMANHO_CASA/2 - 15, MARGEM + TAMANHO_TABULEIRO * TAMANHO_CASA + 10 };
+        retangulo_t ret = { pos, {30, 30} };
+        cor_t cor = (selecao.tipo == COLUNA && selecao.indice == j) ? cor_selecionado : cor_padrao;
+        j_retangulo(ret, 2, cor, cor);
+
+        char txt[2];
+        sprintf(txt, "%d", j + 1);
+        j_texto((ponto_t){pos.x + 5, pos.y + 22}, (cor_t){1,1,1,1}, txt);
+    }
+}
+void desenha_tabuleiro(Tabuleiro *tab, jogo *pj) {
+    // Desenha o tabuleiro
+    imprimirTabuleiro(tab, pj);
+    
+    // Desenha os seletores de linha e coluna
+    selecao_t selecao = { NENHUM, -1 };
+    processa_clique_mouse(&selecao);
+    desenha_seletores(selecao);
+}
+
+
+int main() {
+    srand(time(NULL)); // Inicializa gerador de números aleatórios
+    // Inicializa Allegro
+    if (!al_init()) {
+        fprintf(stderr, "Falha ao inicializar a Allegro.\n");
+        return -1;
+    }
+
+    // cria e inicializa o descritor do jogo
     jogador j;
     jogo jogo;
     Tabuleiro tab;
 
-    inicializa_jogo(&jogo, &j, &tab);
-    
-    vid_inicia();
+    jogo.tamanho_janela = (tamanho_t){ 700, 500 };
+    jogo.contorno_janela = (retangulo_t){{ 30, 30 }, { 440, 440 }};
 
-    vid_cor_fundo(fundo);
-    vid_atualiza();
-    vid_limpa();
+    j_inicializa(jogo.tamanho_janela, "Jogo das Cores"); // inicializa a janela gráfica
+    inicializa_jogo(&jogo, &j, &tab); // Inicializa o jogo
 
-    imprimirTabela(&tab);
-    sleep(2);
-
-    while (!jogo.terminou) {
+    //laço principal
+    while(!jogo.terminou) {
+        desenha_tela(&tab, &j, &jogo); // Desenha a tela
+        // Processa o tempo de jogo
         processa_tempo(&jogo);
         //adiciona pontos ao jogador quando completa uma coluna
         adicionar_pontos(&j, &tab);
-
-        j.pontuacao += 10;
-
         // Verifica se passou de etapa
         verificaEtapa(&jogo, &j, &tab);
-
         // Verifica linhas vazias e preenche
         verificaLinhaVazia(&tab);
-    
         // Verifica se o jogador quer jogar novamente
         if (jogo.terminou) {
             salvarPontuacao(&j);
@@ -388,35 +500,7 @@ void jogar() {
             if(jogarNovamente(&jogo, &j, &tab)) continue;
             else break;
         }
-
-        // Movimentos das linhas
-        move_lin_para_direita(&tab, 0);
-        move_lin_para_esquerda(&tab, 1);
-        move_lin_para_direita(&tab, 2);
-        move_lin_para_esquerda(&tab, 3);
-        move_lin_para_direita(&tab, 4);
-        move_lin_para_esquerda(&tab, 5);
-        // Movimentos das colunas
-        move_col_para_direita(&tab, 0);
-        move_col_para_esquerda(&tab, 1);        
-        move_col_para_direita(&tab, 2);
-        move_col_para_esquerda(&tab, 3);
-        move_col_para_direita(&tab, 4);
-
     }
 
-    vid_fim();
-}
-
-int main() {
-    // Inicializa gerador de números aleatórios
-    srand(time(NULL));
-    // Inicializa Allegro
-    if (!al_init()) {
-        fprintf(stderr, "Falha ao inicializar a Allegro.\n");
-        return -1;
-    }
-    
-    jogar();
-    return 0;
+    j_finaliza();
 }
