@@ -12,18 +12,17 @@
 #include <allegro5/allegro_ttf.h>
 #include <allegro5/allegro_image.h>
 
-// Definições
-#define LINHAS 9
-#define COLUNAS 10
+//------------- Definições e constantes --------
+#define LINHAS 7
+#define COLUNAS 8
 #define MAX_CORES 8
 int num_cores = 4;
-int tempoEtapa = 30;
+int tempoEtapa = 10;
 int larguraJanela = 10 * COLUNAS;
 int alturaJanela = 10 * LINHAS;
 
-// Tipos
+// ------------ Tipos e estruturas --------------
 typedef enum { NENHUM, LINHA, COLUNA } tipo_selecao_t;
-
 typedef struct {
     tipo_selecao_t tipo;
     int indice;
@@ -36,6 +35,7 @@ typedef struct {
 } Tabuleiro;
 
 typedef struct {
+    int peca_removidas;
     int pontuacao;
     char nome[50];
 } jogador;
@@ -58,7 +58,7 @@ typedef struct {
 recorde_t *ranking = NULL;
 int num_recordes = 0;
 
-// cores
+// ------------ Cores globais --------------
 cor_t cores[MAX_CORES + 1] = {
     {0, 0, 0, 1},                        // Fundo
     {1, 0, 0, 1},                        // Vermelho
@@ -71,12 +71,12 @@ cor_t cores[MAX_CORES + 1] = {
     {165.0/255, 42.0/255, 42.0/255, 1}   // Marrom
 };
 
-// Funções utilitárias
+// ----------- Funções auxiliares --------------
 double relogio() { return al_get_time(); }
 int aleatorio(int min, int max) { return min + rand() % (max - min); }
 void limpa_eventos() { while (j_tecla() != T_NADA); }
 
-void processa_tempo(jogo *pj) {
+void processaTempo(jogo *pj) {
     pj->tempo_de_jogo = j_relogio() - pj->data_inicio;
     if (pj->tempo_de_jogo >= tempoEtapa) pj->terminou = true;
 }
@@ -106,7 +106,7 @@ void gerar_tabuleiro(Tabuleiro *tab) {
 }
 
 // Desenha o quadrado que representa uma célula do tabuleiro
-void desenha_celula(int lin, int col, unsigned char valor, jogo *pj) {
+void desenhaCelula(int lin, int col, unsigned char valor, jogo *pj) {
     ponto_t origem = {
         pj->contorno_janela.inicio.x + col * 60,
         pj->contorno_janela.inicio.y + lin * 60
@@ -114,17 +114,22 @@ void desenha_celula(int lin, int col, unsigned char valor, jogo *pj) {
     tamanho_t tam = {58, 58};
     retangulo_t celula = {origem, tam};
 
-    cor_t cor = (valor <= MAX_CORES) ? cores[valor] : cores[0];
+    cor_t cor;
+    if (valor <= MAX_CORES) {
+        cor = cores[valor];
+    } else {
+        cor = cores[0];
+    }
 
     j_retangulo(celula, 0, cor, cor);
     j_retangulo(celula, 2, (cor_t){1,1,1,1}, (cor_t){0,0,0,0});
 }
 
 // Desenha o tabuleiro inteiro
-void desenha_tabuleiro(Tabuleiro *tab, jogo *pj) {
+void desenhaTabuleiro(Tabuleiro *tab, jogo *pj) {
     for (int i = 0; i < tab->linhas; i++) {
         for (int j = 0; j < tab->colunas; j++) {
-            desenha_celula(i, j, tab->dados[i][j], pj);
+            desenhaCelula(i, j, tab->dados[i][j], pj);
         }
     }
 }
@@ -144,7 +149,7 @@ void aplicarGravidade(Tabuleiro *tab) {
             }
         }
 
-        // Preenche o topo com zeros, se sobrou espaço
+        // Preenche o topo com zeros, se tiver sobrado espaço
         while (destino >= 0) {
             tab->dados[destino][col] = 0;
             destino--;
@@ -152,7 +157,7 @@ void aplicarGravidade(Tabuleiro *tab) {
     }
 }
 
-bool mover_linha(Tabuleiro *tab, int lin, int direcao) {
+bool moveLinha(Tabuleiro *tab, int lin, int direcao) {
     if (lin < 0 || lin >= tab->linhas) return false;
 
     // Se o numero for maior que 0 move pra direita, se for menor move pra esquerda
@@ -173,7 +178,7 @@ bool mover_linha(Tabuleiro *tab, int lin, int direcao) {
     return true;
 }
 
-bool mover_coluna(Tabuleiro *tab, int col, int direcao) {
+bool moveColuna(Tabuleiro *tab, int col, int direcao) {
     int destino = (col + direcao + tab->colunas) % tab->colunas;
 
     // Verifica se o topo da coluna de destino está livre
@@ -220,7 +225,6 @@ void verifica_linhas_vazias(Tabuleiro *tab) {
 }
 
 // -------- Pontuação e Etapas --------
-
 bool verifica_coluna_iguais(Tabuleiro *tab, int col) {
     unsigned char ref = tab->dados[0][col];
     if (ref == 0) return false;
@@ -238,42 +242,48 @@ bool verifica_coluna_iguais(Tabuleiro *tab, int col) {
     return true;
 }
 
-void adicionarPontos(Tabuleiro *tab, jogador *jog) {
+void adicionarPontos(Tabuleiro *tab, jogador *jog, jogo *pj) {
     for (int col = 0; col < tab->colunas; col++) {
         if (verifica_coluna_iguais(tab, col)) {
-            jog->pontuacao += tab->linhas;
+            jog->pontuacao += tab->linhas * pj->etapa;
+            jog->peca_removidas += tab->linhas;
         }
     }
 }
 
 void limpaLinha(Tabuleiro *tab, int lin, jogador *jog) {
-    for (int j = 0; j < tab->colunas; j++) {
-        tab->dados[lin][j] = 0;
-    }
-    aplicarGravidade(tab);
     // Diminui a pontuação do jogador
-    jog->pontuacao -= 2;
+    if (jog->pontuacao >= 2) {
+        for (int j = 0; j < tab->colunas; j++) {
+            tab->dados[lin][j] = 0;
+        }
+    aplicarGravidade(tab);
+        jog->pontuacao -= 2;
+    }
 }
 
 void verificaEtapa(jogo *pj, jogador *jog, Tabuleiro *tab) {
-    int meta = (tab->linhas * tab->colunas) / 2 * pj->etapa;
-    if (jog->pontuacao >= meta) {
+    static int meta = 0;
+
+    if (meta == 0) meta = (tab->linhas * tab->colunas) / 2;
+
+    // Só avança se pontuação atingiu a meta
+    if (jog->peca_removidas >= meta) {
         pj->etapa += 1;
-        meta = 0;
-        // Aumento gradual das cores conforme a etapa
-        if (pj->etapa == 2) num_cores = 5;
-        else if (pj->etapa == 3) num_cores = 6;
-        else if (pj->etapa == 4) num_cores = 7;
-        else if (pj->etapa >= 5) num_cores = 8;
-    
+        num_cores +=1;
+        if (num_cores > MAX_CORES) num_cores = MAX_CORES;
+        jog->pontuacao += 50 * pj->etapa;
+
         gerar_tabuleiro(tab);
         pj->data_inicio = relogio();
+
+        // Define nova meta para próxima etapa
+        meta = jog->peca_removidas + (tab->linhas * tab->colunas) / 2;
     }
 }
 
 // ---------- Entrada do mouse e seletores ----------
-
-void processa_clique(selecao_t *sel, jogo *pj) {
+void processaClick(selecao_t *sel, jogo *pj) {
     rato_t rato = j_rato();
 
     if (rato.clicado[0]) {
@@ -313,11 +323,9 @@ void insereNome(char *texto, int max_len, ponto_t pos, const char *mensagem) {
         char exibir[200];
         snprintf(exibir, sizeof(exibir), "%s %s_", mensagem, buffer);
         j_texto(pos, (cor_t){1,1,1,1}, exibir);
-
         j_mostra();
 
         tecla_t tecla = j_tecla();
-
         if (tecla >= 32 && tecla <= 126) {
             if (tamanho < (int)sizeof(buffer) - 1) {
                 buffer[tamanho++] = (char)tecla;
@@ -332,16 +340,12 @@ void insereNome(char *texto, int max_len, ponto_t pos, const char *mensagem) {
         }
     }
 
-    if (strlen(buffer) == 0) {
-        strcpy(buffer, "Anonimo");
-    }
-
     strncpy(texto, buffer, max_len - 1);
     texto[max_len - 1] = '\0';
 }
 
 // --------- Desenho da tela ---------
-void desenha_seletores(selecao_t sel, jogo *pj) {
+void desenhaSeletores(selecao_t sel, jogo *pj) {
     cor_t normal = {0.5, 0.5, 0.5, 1};
     cor_t selecionado = {1, 0.5, 0, 1};
 
@@ -360,15 +364,15 @@ void desenha_seletores(selecao_t sel, jogo *pj) {
     }
 }
 
-void desenha_tela(Tabuleiro *tab, jogador *jog, jogo *pj, selecao_t sel) {
+void desenhaTela(Tabuleiro *tab, jogador *jog, jogo *pj, selecao_t sel) {
     j_retangulo(pj->contorno_janela, 3, (cor_t){1,1,1,1}, (cor_t){0,0,0,0});
 
-    desenha_tabuleiro(tab, pj);
-    desenha_seletores(sel, pj);
+    desenhaTabuleiro(tab, pj);
+    desenhaSeletores(sel, pj);
 
     ponto_t texto = {pj->contorno_janela.inicio.x, pj->contorno_janela.inicio.y + pj->contorno_janela.tamanho.altura + 80};
     char info[200];
-    sprintf(info, "Tempo: %2.f | Pontos: %d | Etapa: %d", pj->tempo_de_jogo, jog->pontuacao, pj->etapa);
+    sprintf(info, "Tempo: %2.f | Pontos: %d | Etapa: %d | Use ← → para mover e L para limpar linha", pj->tempo_de_jogo, jog->pontuacao, pj->etapa);
     j_texto(texto, (cor_t){1,1,1,1}, info);
 
     j_mostra();
@@ -380,7 +384,6 @@ void inicializaJogo (jogador *jog, jogo *pj, Tabuleiro *tab){
     pj->contorno_janela = (retangulo_t){{100, 100}, {60 * COLUNAS, 60 * LINHAS}};
     pj->etapa = 1;
     pj->terminou = false;
-
     tab->linhas = LINHAS;
     tab->colunas = COLUNAS;
     gerar_tabuleiro(tab);
@@ -397,11 +400,13 @@ void reiniciaPartida(Tabuleiro *tab, jogador *jog, jogo *pj) {
     pj->etapa = 1;
     pj->terminou = false;
     jog->pontuacao = 0;
+    jog->peca_removidas = 0;
     pj->data_inicio = relogio();
+    num_cores = 4; // Reseta o número de cores
     gerar_tabuleiro(tab);
 }
 
-// --------- Função para salvar a pontuação ---------
+// --------- Função para gravar o ranking ---------
 void lerRanking() {
     FILE *arq = fopen("ranking.bin", "rb");
     if (!arq) {
@@ -430,7 +435,7 @@ void inserirRecorde(const char *nome, int pontos, int etapa) {
     ranking[num_recordes].etapa = etapa;
     num_recordes++;
 
-    // Ordena os recordes por pontuação (decrescente)
+    // Ordena os recordes por pontuação
     for (int i = 0; i < num_recordes - 1; i++) {
         for (int j = i + 1; j < num_recordes; j++) {
             if (ranking[j].pontuacao > ranking[i].pontuacao) {
@@ -442,24 +447,27 @@ void inserirRecorde(const char *nome, int pontos, int etapa) {
     }
 }
 
+void desenhaRanking(){
+    ponto_t pos = {200, 150};
+    if (num_recordes == 0) {
+        j_texto(pos, (cor_t){1,1,1,1}, "Nenhum ranking disponível.");
+    } else {
+        ponto_t atual = pos;
+        for (int i = 0; i < num_recordes; i++) {
+            char linha[200];
+            snprintf(linha, sizeof(linha), "%d - %s: %d pontos (Etapa %d)", i+1, ranking[i].nome, ranking[i].pontuacao, ranking[i].etapa);
+            j_texto(atual, (cor_t){1,1,1,1}, linha);
+            atual.y += 30;
+        }
+    }
+}
+
 void mostrarRanking() {
     limpa_eventos();
     ponto_t pos = {200, 150};
     while (true) {
         al_clear_to_color(al_map_rgb_f(0, 0, 0));
-
-        if (num_recordes == 0) {
-            j_texto(pos, (cor_t){1,1,1,1}, "Nenhum ranking disponível.");
-        } else {
-            ponto_t atual = pos;
-            for (int i = 0; i < num_recordes; i++) {
-                char linha[200];
-                snprintf(linha, sizeof(linha), "%d - %s: %d pontos (Etapa %d)", i+1, ranking[i].nome, ranking[i].pontuacao, ranking[i].etapa);
-                j_texto(atual, (cor_t){1,1,1,1}, linha);
-                atual.y += 30;
-            }
-        }
-
+        desenhaRanking();
         j_texto((ponto_t){200, pos.y + 30 * (num_recordes + 2)}, (cor_t){1,1,1,1}, "Pressione ESC para voltar.");
         j_mostra();
 
@@ -468,28 +476,28 @@ void mostrarRanking() {
     }
 }
 
+
 // --------- Desenho Menu final ---------
+void desenhaOpcoes(ponto_t pos) {
+    al_clear_to_color(al_map_rgb_f(0, 0, 0));
+    j_texto(pos, (cor_t){1,1,1,1}, "1 - Ver Ranking");
+    pos.y += 40;
+    j_texto(pos, (cor_t){1,1,1,1}, "2 - Reiniciar Jogo");
+    pos.y += 40;
+    j_texto(pos, (cor_t){1,1,1,1}, "3 - Sair");
+    pos.y += 60;
+    j_texto(pos, (cor_t){1,1,1,1}, "Escolha uma opcao");
+    j_mostra();
+}
+
 void menuFinal(Tabuleiro *tab, jogador *jog, jogo *pj, selecao_t sel) {
     bool menu_ativo = true;
     limpa_eventos();
 
     while (menu_ativo) {
         ponto_t pos = {pj->contorno_janela.inicio.x + 20, pj->contorno_janela.inicio.y + 150};
-
-        al_clear_to_color(al_map_rgb_f(0, 0, 0));
-
-        j_texto(pos, (cor_t){1,1,1,1}, "1 - Ver Ranking");
-        pos.y += 40;
-        j_texto(pos, (cor_t){1,1,1,1}, "2 - Reiniciar Jogo");
-        pos.y += 40;
-        j_texto(pos, (cor_t){1,1,1,1}, "3 - Sair");
-        pos.y += 60;
-        j_texto(pos, (cor_t){1,1,1,1}, "Escolha uma opcao");
-
-        j_mostra();
-
+        desenhaOpcoes(pos);
         tecla_t tecla = j_tecla();
-
         if (tecla == '1') {
             mostrarRanking();
         } else if (tecla == '2') {
@@ -502,72 +510,86 @@ void menuFinal(Tabuleiro *tab, jogador *jog, jogo *pj, selecao_t sel) {
     }
 }
 
+void verificaCasoSalvar(jogador *jog, jogo *pj, selecao_t sel) {
+    ponto_t texto = {pj->contorno_janela.inicio.x + 30, pj->contorno_janela.inicio.y + 30};
+    bool verdadeiro = true;
+    while (verdadeiro){
+        tecla_t tecla = j_tecla();
+        if (tecla == 's' || tecla == 'S') {
+            ponto_t pos_nome = {texto.x, texto.y + 60};
+            insereNome(jog->nome, sizeof(jog->nome), pos_nome, "Digite seu nome: ");
+            j_mostra();
+            inserirRecorde(jog->nome, jog->pontuacao, pj->etapa);
+            gravarRanking();
+            verdadeiro = false;
+        } else if( tecla == 'n' || tecla == 'N') {
+            verdadeiro = false;
+        }
+    }
+}
+
 //------- Desenha a tela final --------
-
 void desenha_tela_final(Tabuleiro *tab, jogador *jog, jogo *pj, selecao_t sel) {
-    j_retangulo(pj->contorno_janela, 3, (cor_t){1,1,1,1}, (cor_t){0,0,0,0});
+    j_retangulo(pj->contorno_janela, 5, (cor_t){1,1,1,1}, (cor_t){0,0,0,0});
 
-    ponto_t texto = {pj->contorno_janela.inicio.x + 20, pj->contorno_janela.inicio.y + 20};
+    ponto_t texto = {pj->contorno_janela.inicio.x + 30, pj->contorno_janela.inicio.y + 30};
 
     j_texto(texto, (cor_t){1,1,1,1}, "Fim de Jogo!");
+    texto.y += 50;
+    j_texto(texto, (cor_t){1,1,1,1}, "Deseja salvar sua pontuacao? (S/N)");
     j_mostra();
-    al_rest(2.0);
-
-    ponto_t pos_nome = {texto.x, texto.y + 60};
-    insereNome(jog->nome, sizeof(jog->nome), pos_nome, "Digite seu nome: ");
-    j_mostra();
-
-    inserirRecorde(jog->nome, jog->pontuacao, pj->etapa);
-    gravarRanking();
-
+    
+    verificaCasoSalvar(jog, pj, sel);
     menuFinal(tab, jog, pj, sel);
 }
 
+void processaTecla(tecla_t tecla, selecao_t *sel, Tabuleiro *tab, jogador *jog) {
+    if (sel->tipo == LINHA) {
+        if (tecla == T_DIREITA) moveLinha(tab, sel->indice, +1);
+        if (tecla == T_ESQUERDA) moveLinha(tab, sel->indice, -1);
+    } else if (sel->tipo == COLUNA) {
+        if (tecla == T_DIREITA) moveColuna(tab, sel->indice, +1);
+        if (tecla == T_ESQUERDA) moveColuna(tab, sel->indice, -1);
+    }
+
+    if (tecla == 'l' || tecla == 'L') limpaLinha(tab, sel->indice, jog);
+}
+
+void jogar(jogador *jog, jogo *pj, Tabuleiro *tab, selecao_t *sel) {
+    while (!pj->terminou) {
+        processaClick(sel, pj);
+        processaTempo(pj);
+
+        tecla_t tecla = j_tecla();
+
+        desenhaTela(tab, jog, pj, *sel);
+        adicionarPontos(tab, jog, pj);
+        verificaEtapa(pj, jog, tab);
+        verifica_linhas_vazias(tab);
+
+        processaTecla(tecla, sel, tab, jog);
+
+        if (pj->terminou) desenha_tela_final(tab, jog, pj, *sel);
+
+        if (tecla == T_END) pj->terminou = true;
+    }
+}
 
 // --------- Função Principal ---------
 int main() {
     srand(time(NULL));
+
     jogador jog;
     jogo pj;
     Tabuleiro tab;
     selecao_t selecao = {NENHUM, -1};
+
     inicializaJogo(&jog, &pj, &tab);
     lerRanking();
-
-    while (!pj.terminou) {
-        processa_clique(&selecao, &pj);
-        processa_tempo(&pj);
-        tecla_t tecla = j_tecla();
-        desenha_tela(&tab, &jog, &pj, selecao);
-        adicionarPontos(&tab, &jog);
-        verificaEtapa(&pj, &jog, &tab);
-        verifica_linhas_vazias(&tab);
-        if (selecao.tipo == LINHA) {
-            if (tecla == T_DIREITA) mover_linha(&tab, selecao.indice, +1);
-            if (tecla == T_ESQUERDA) mover_linha(&tab, selecao.indice, -1);
-        }
-
-        if (selecao.tipo == COLUNA) {
-            if (tecla == T_DIREITA) mover_coluna(&tab, selecao.indice, +1);
-            if (tecla == T_ESQUERDA) mover_coluna(&tab, selecao.indice, -1);
-        }
-
-        if (tecla == 'l' || tecla == 'L') {
-            limpaLinha(&tab, selecao.indice, &jog);
-        }
-
-        if (pj.terminou){
-            desenha_tela_final(&tab, &jog, &pj, selecao);
-        }
-        
-
-        if (tecla == T_END) pj.terminou = true;
-    }
-
-    
+    jogar(&jog, &pj, &tab, &selecao);
 
     free(ranking);
-
     j_finaliza();
     return 0;
 }
+
